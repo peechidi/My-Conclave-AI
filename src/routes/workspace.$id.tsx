@@ -7,7 +7,6 @@ import { TopNav } from "@/components/top-nav";
 import {
   councilMembers,
   accentClasses,
-  timelineStages,
   trustClaims,
   knowledgePacks,
   generatedContent,
@@ -16,7 +15,10 @@ import {
 import { useProject, useProjects } from "@/hooks/use-projects";
 import { useDocuments, useDeleteDocument, useUploadDocument } from "@/hooks/use-documents";
 import { useProcessDocument, useProcessedDocument } from "@/hooks/use-document-processing";
+import { useCouncil, useStartCouncil } from "@/hooks/use-council";
 import { getDocumentUrl, validateDocumentFile, type DocumentRecord } from "@/lib/document-service";
+import { COUNCIL_AGENTS, type AgentResponse } from "@/lib/council-service";
+import type { AgentKey } from "@/lib/database.types";
 import { Button } from "@/components/ui/button";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -55,8 +57,12 @@ import {
   FileDown,
   Sliders,
   ArrowRight,
-  MessageSquare,
   Trash2,
+  Stethoscope,
+  AlignLeft,
+  Users,
+  Globe,
+  PenTool,
 } from "lucide-react";
 
 function formatFileSize(bytes: number): string {
@@ -91,6 +97,12 @@ function Workspace() {
   const { id } = useParams({ from: "/workspace/$id" });
   const { data: project, isLoading } = useProject(id);
   const [step, setStep] = useState<Step>("council");
+  const [activeCouncilDocumentId, setActiveCouncilDocumentId] = useState<string | null>(null);
+
+  function handleStartCouncilFor(documentId: string) {
+    setActiveCouncilDocumentId(documentId);
+    setStep("council");
+  }
 
   if (isLoading) {
     return (
@@ -154,7 +166,7 @@ function Workspace() {
                     <Button variant="outline" size="sm" className="gap-1.5">
                       <Share2 className="h-3.5 w-3.5" /> Share
                     </Button>
-                    <Button size="sm" className="gap-1.5">
+                    <Button size="sm" className="gap-1.5" onClick={() => setStep("council")}>
                       <Sparkles className="h-3.5 w-3.5" /> Convene council
                     </Button>
                   </div>
@@ -201,8 +213,10 @@ function Workspace() {
 
             <div className="grid gap-6 p-8 xl:grid-cols-[minmax(0,1fr)_360px]">
               <div className="min-w-0">
-                {step === "upload" && <UploadStep projectId={project.id} />}
-                {step === "council" && <CouncilStep />}
+                {step === "upload" && (
+                  <UploadStep projectId={project.id} onStartCouncil={handleStartCouncilFor} />
+                )}
+                {step === "council" && <CouncilStep documentId={activeCouncilDocumentId} />}
                 {step === "content" && <ContentStep />}
                 {step === "trust" && <TrustStep />}
                 {step === "export" && <ExportStep />}
@@ -325,7 +339,13 @@ function Card({ children, className }: { children: React.ReactNode; className?: 
 
 /* ---------- Steps ---------- */
 
-function UploadStep({ projectId }: { projectId: string }) {
+function UploadStep({
+  projectId,
+  onStartCouncil,
+}: {
+  projectId: string;
+  onStartCouncil: (documentId: string) => void;
+}) {
   const { data: documents, isLoading, isError } = useDocuments(projectId);
   const uploadDocument = useUploadDocument(projectId);
   const deleteDocument = useDeleteDocument(projectId);
@@ -492,6 +512,7 @@ function UploadStep({ projectId }: { projectId: string }) {
               doc={doc}
               onDownload={handleDownload}
               onDeleteRequest={setDeleteTarget}
+              onStartCouncil={onStartCouncil}
             />
           ))}
         </div>
@@ -529,10 +550,12 @@ function DocumentRow({
   doc,
   onDownload,
   onDeleteRequest,
+  onStartCouncil,
 }: {
   doc: DocumentRecord;
   onDownload: (doc: DocumentRecord) => void;
   onDeleteRequest: (doc: DocumentRecord) => void;
+  onStartCouncil: (documentId: string) => void;
 }) {
   const { data: content } = useProcessedDocument(doc.id);
   const retryProcessing = useProcessDocument();
@@ -584,11 +607,17 @@ function DocumentRow({
       </div>
 
       {status === "ready" && content && (
-        <div className="ml-14 mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
+        <div className="ml-14 mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
           <span>Pages: {content.page_count ?? "—"}</span>
           <span>Words: {content.word_count ?? "—"}</span>
           <span>Language: {content.language ?? "—"}</span>
           {processingSeconds !== null && <span>Processed in {processingSeconds}s</span>}
+          <button
+            onClick={() => onStartCouncil(doc.id)}
+            className="inline-flex items-center gap-1 font-medium text-indigo underline-offset-2 hover:underline"
+          >
+            <Sparkles className="h-3 w-3" /> Start AI Council
+          </button>
         </div>
       )}
 
@@ -609,7 +638,48 @@ function DocumentRow({
   );
 }
 
-function CouncilStep() {
+const AGENT_ICONS: Record<AgentKey, typeof Sparkles> = {
+  medical_reviewer: Stethoscope,
+  content_strategist: AlignLeft,
+  audience_specialist: Users,
+  public_health_advisor: Globe,
+  creative_storytelling_editor: PenTool,
+};
+
+const AGENT_ACCENTS: Record<AgentKey, keyof typeof accentClasses> = {
+  medical_reviewer: "rose",
+  content_strategist: "indigo",
+  audience_specialist: "sky",
+  public_health_advisor: "emerald",
+  creative_storytelling_editor: "amber",
+};
+
+function CouncilStep({ documentId }: { documentId: string | null }) {
+  const { data: council, isLoading } = useCouncil(documentId);
+  const startCouncil = useStartCouncil();
+
+  if (!documentId) {
+    return (
+      <Card className="p-12 text-center">
+        <div className="mx-auto grid h-12 w-12 place-items-center rounded-2xl bg-indigo-soft text-indigo">
+          <Sparkles className="h-5 w-5" />
+        </div>
+        <h2 className="font-display mt-4 text-xl">No document selected</h2>
+        <p className="mt-1.5 text-sm text-muted-foreground">
+          Go to Source and click "Start AI Council" on a document that's ready for AI.
+        </p>
+      </Card>
+    );
+  }
+
+  const session = council?.session ?? null;
+  const responses = council?.responses ?? [];
+  const summary = council?.summary ?? null;
+
+  function responseFor(agentKey: AgentKey): AgentResponse | null {
+    return responses.find((r) => r.agent_key === agentKey) ?? null;
+  }
+
   return (
     <div className="space-y-6">
       {/* Config bar */}
@@ -652,89 +722,183 @@ function CouncilStep() {
         </div>
       </Card>
 
-      {/* Timeline */}
-      <Card className="p-8">
-        <div className="flex items-baseline justify-between">
-          <div>
-            <div className="text-xs uppercase tracking-widest text-muted-foreground">
-              Collaboration timeline
-            </div>
-            <h2 className="font-display mt-1 text-2xl">Council session · in progress</h2>
+      {!isLoading && !session && (
+        <Card className="p-12 text-center">
+          <div className="mx-auto grid h-12 w-12 place-items-center rounded-2xl bg-indigo-soft text-indigo">
+            <Sparkles className="h-5 w-5" />
           </div>
-          <div className="flex items-center gap-2 text-xs text-muted-foreground">
-            <span className="relative flex h-2 w-2">
-              <span className="absolute inline-flex h-full w-full rounded-full bg-indigo opacity-60 animate-ping" />
-              <span className="relative inline-flex h-2 w-2 rounded-full bg-indigo" />
-            </span>
-            Live · 1m 52s elapsed
-          </div>
-        </div>
+          <h2 className="font-display mt-4 text-xl">Ready to convene the council</h2>
+          <p className="mt-1.5 text-sm text-muted-foreground">
+            Five specialists will review this document one after another.
+          </p>
+          <Button
+            className="mt-5 gap-1.5"
+            onClick={() => startCouncil.mutate(documentId)}
+            disabled={startCouncil.isPending}
+          >
+            {startCouncil.isPending && <Loader2 className="h-4 w-4 animate-spin" />}
+            Start AI Council
+          </Button>
+        </Card>
+      )}
 
-        <div className="relative mt-8">
-          <div className="absolute left-[15px] top-2 bottom-2 w-px bg-border" />
-          <div className="space-y-6">
-            {timelineStages.map((t) => {
-              const member = t.member ? councilMembers.find((m) => m.id === t.member) : undefined;
-              const a = member ? accentClasses[member.accent] : accentClasses.indigo;
-              const Icon = member?.icon ?? CheckCircle2;
-              return (
-                <div key={t.id} className="relative flex gap-4">
-                  <div
-                    className={cn(
-                      "relative z-10 grid h-8 w-8 shrink-0 place-items-center rounded-full ring-4 ring-surface",
-                      t.status === "done" && "bg-emerald text-white",
-                      t.status === "active" && cn(a.bg, a.text, "animate-pulse-ring"),
-                      t.status === "pending" && "bg-muted text-muted-foreground",
-                    )}
-                  >
-                    {t.status === "done" ? (
-                      <CheckCircle2 className="h-4 w-4" />
-                    ) : t.status === "active" ? (
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                    ) : (
-                      <Icon className="h-3.5 w-3.5" />
-                    )}
-                  </div>
-                  <div className="flex-1 pb-1">
-                    <div className="flex items-center gap-2">
-                      <div className="text-sm font-medium">{t.title}</div>
-                      {member && (
-                        <span className={cn("rounded-full px-2 py-0.5 text-[10px]", a.bg, a.text)}>
-                          {member.title}
-                        </span>
-                      )}
-                      <span className="ml-auto text-xs tabular-nums text-muted-foreground">
-                        {t.time}
-                      </span>
-                    </div>
-                    <div className="mt-1 text-sm text-muted-foreground">{t.note}</div>
-                    {t.status === "active" && (
-                      <div className="mt-3 rounded-xl border border-border/70 bg-surface-muted/60 p-3 text-sm">
-                        <div className="mb-2 flex items-center gap-2 text-xs text-muted-foreground">
-                          <MessageSquare className="h-3 w-3" /> Draft hook · option 1 of 3
-                        </div>
-                        "You'll counsel three patients on GLP-1 agonists this week. Here's the
-                        one-minute script that keeps you out of the weeds — and out of trouble."
-                        <div className="mt-3 flex gap-2">
-                          <Button size="sm" variant="outline" className="h-7">
-                            Accept
-                          </Button>
-                          <Button size="sm" variant="ghost" className="h-7">
-                            Refine
-                          </Button>
-                          <Button size="sm" variant="ghost" className="h-7">
-                            Show alternatives
-                          </Button>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
+      {session && (
+        <Card className="p-8">
+          <div className="flex items-baseline justify-between">
+            <div>
+              <div className="text-xs uppercase tracking-widest text-muted-foreground">
+                Collaboration timeline
+              </div>
+              <h2 className="font-display mt-1 text-2xl">
+                Council session · {session.status === "running" ? "in progress" : session.status}
+              </h2>
+            </div>
+            {session.status === "running" && (
+              <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                <span className="relative flex h-2 w-2">
+                  <span className="absolute inline-flex h-full w-full rounded-full bg-indigo opacity-60 animate-ping" />
+                  <span className="relative inline-flex h-2 w-2 rounded-full bg-indigo" />
+                </span>
+                Live
+              </div>
+            )}
           </div>
-        </div>
-      </Card>
+
+          <div className="relative mt-8">
+            <div className="absolute left-[15px] top-2 bottom-2 w-px bg-border" />
+            <div className="space-y-6">
+              {COUNCIL_AGENTS.map((agent) => {
+                const response = responseFor(agent.key);
+                const status = response?.status ?? "pending";
+                const a = accentClasses[AGENT_ACCENTS[agent.key]];
+                const Icon = AGENT_ICONS[agent.key];
+                return (
+                  <div key={agent.key} className="relative flex gap-4">
+                    <div
+                      className={cn(
+                        "relative z-10 grid h-8 w-8 shrink-0 place-items-center rounded-full ring-4 ring-surface",
+                        status === "completed" && "bg-emerald text-white",
+                        status === "running" && cn(a.bg, a.text, "animate-pulse-ring"),
+                        status === "pending" && "bg-muted text-muted-foreground",
+                        status === "failed" && "bg-rose text-white",
+                      )}
+                    >
+                      {status === "completed" ? (
+                        <CheckCircle2 className="h-4 w-4" />
+                      ) : status === "running" ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : status === "failed" ? (
+                        <AlertTriangle className="h-4 w-4" />
+                      ) : (
+                        <Icon className="h-3.5 w-3.5" />
+                      )}
+                    </div>
+                    <div className="flex-1 pb-1">
+                      <div className="flex items-center gap-2">
+                        <div className="text-sm font-medium">{agent.name}</div>
+                        <span className={cn("rounded-full px-2 py-0.5 text-[10px]", a.bg, a.text)}>
+                          {agent.focus[0]}
+                        </span>
+                        {status === "completed" && response?.confidence_score != null && (
+                          <span className="ml-auto text-xs tabular-nums text-muted-foreground">
+                            Confidence {response.confidence_score}/100
+                          </span>
+                        )}
+                      </div>
+
+                      {status === "running" && (
+                        <div className="mt-1 text-sm text-muted-foreground">Thinking…</div>
+                      )}
+
+                      {status === "failed" && (
+                        <div className="mt-1 text-sm text-rose">
+                          {response?.error ?? "This agent's review failed."}
+                        </div>
+                      )}
+
+                      {status === "completed" && response && (
+                        <div className="mt-3 rounded-xl border border-border/70 bg-surface-muted/60 p-3 text-sm">
+                          <p className="text-foreground/90">{response.summary}</p>
+                          <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                            <div>
+                              <div className="text-[11px] font-medium uppercase tracking-wider text-emerald">
+                                Strengths
+                              </div>
+                              <ul className="mt-1 space-y-1 text-xs text-muted-foreground">
+                                {response.strengths.map((s, i) => (
+                                  <li key={i}>· {s}</li>
+                                ))}
+                              </ul>
+                            </div>
+                            <div>
+                              <div className="text-[11px] font-medium uppercase tracking-wider text-amber">
+                                Weaknesses
+                              </div>
+                              <ul className="mt-1 space-y-1 text-xs text-muted-foreground">
+                                {response.weaknesses.map((s, i) => (
+                                  <li key={i}>· {s}</li>
+                                ))}
+                              </ul>
+                            </div>
+                          </div>
+                          <div className="mt-3">
+                            <div className="text-[11px] font-medium uppercase tracking-wider text-indigo">
+                              Recommendations
+                            </div>
+                            <ul className="mt-1 space-y-1 text-xs text-muted-foreground">
+                              {response.recommendations.map((s, i) => (
+                                <li key={i}>· {s}</li>
+                              ))}
+                            </ul>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </Card>
+      )}
+
+      {summary && (
+        <Card className="p-8">
+          <div className="text-xs uppercase tracking-widest text-muted-foreground">
+            Council summary
+          </div>
+          <h2 className="font-display mt-1 text-2xl">
+            Overall confidence {summary.overall_confidence ?? "—"}/100
+          </h2>
+          <p className="mt-3 text-sm text-muted-foreground">{summary.consensus}</p>
+
+          {summary.conflicts.length > 0 && (
+            <div className="mt-4">
+              <div className="text-[11px] font-medium uppercase tracking-wider text-rose">
+                Conflicts
+              </div>
+              <ul className="mt-1 space-y-1 text-sm text-muted-foreground">
+                {summary.conflicts.map((c, i) => (
+                  <li key={i}>· {c}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {summary.recommended_improvements.length > 0 && (
+            <div className="mt-4">
+              <div className="text-[11px] font-medium uppercase tracking-wider text-indigo">
+                Recommended improvements
+              </div>
+              <ul className="mt-1 space-y-1 text-sm text-muted-foreground">
+                {summary.recommended_improvements.map((r, i) => (
+                  <li key={i}>· {r}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </Card>
+      )}
     </div>
   );
 }
