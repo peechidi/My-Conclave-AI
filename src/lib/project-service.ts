@@ -1,6 +1,5 @@
 import type { PostgrestError } from "@supabase/supabase-js";
 import { supabase } from "@/lib/supabase";
-import { getSession } from "@/lib/auth-service";
 import type { Database } from "@/lib/database.types";
 
 export type Project = Database["public"]["Tables"]["projects"]["Row"];
@@ -14,10 +13,28 @@ function logSupabaseError(op: string, error: PostgrestError) {
   });
 }
 
+// Verifies against Supabase's Auth server (not the local session cache) so
+// that a stale/missing token surfaces here as an explicit error, not as a
+// silently-undefined user_id on the insert payload below.
 async function requireUserId(): Promise<string> {
-  const session = await getSession();
-  if (!session) throw new Error("You must be signed in to do that.");
-  return session.user.id;
+  const { data, error } = await supabase.auth.getUser();
+  console.log("[projects] auth.getUser() user:", data.user);
+  console.log("[projects] auth.getUser() user.id:", data.user?.id);
+
+  if (error) {
+    console.error("[projects] auth.getUser() error:", {
+      name: error.name,
+      status: error.status,
+      message: error.message,
+    });
+    throw new Error(`Not signed in (auth.getUser failed: ${error.message}).`);
+  }
+
+  if (!data.user?.id) {
+    throw new Error("Not signed in: auth.getUser() returned no user.");
+  }
+
+  return data.user.id;
 }
 
 export async function listProjects(): Promise<Project[]> {
