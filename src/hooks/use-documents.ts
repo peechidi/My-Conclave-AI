@@ -5,6 +5,8 @@ import {
   uploadDocument,
   type DocumentRecord,
 } from "@/lib/document-service";
+import { processDocument } from "@/lib/document-processing-service";
+import { documentContentKey } from "@/hooks/use-document-processing";
 
 const documentsKey = (projectId: string) => ["documents", projectId] as const;
 
@@ -16,7 +18,17 @@ export function useUploadDocument(projectId: string) {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (file: File) => uploadDocument(projectId, file),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: documentsKey(projectId) }),
+    onSuccess: (document) => {
+      queryClient.invalidateQueries({ queryKey: documentsKey(projectId) });
+      // Kick off processing automatically — fire-and-forget, doesn't block the
+      // upload from resolving. processDocument() never throws (it stores its
+      // own failures), this catch is just an extra safety net.
+      processDocument(document.id)
+        .catch((err) => console.error("[documents] auto-processing failed:", err))
+        .finally(() =>
+          queryClient.invalidateQueries({ queryKey: documentContentKey(document.id) }),
+        );
+    },
   });
 }
 

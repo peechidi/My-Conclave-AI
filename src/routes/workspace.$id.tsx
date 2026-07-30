@@ -15,6 +15,7 @@ import {
 } from "@/lib/mock-data";
 import { useProject, useProjects } from "@/hooks/use-projects";
 import { useDocuments, useDeleteDocument, useUploadDocument } from "@/hooks/use-documents";
+import { useProcessDocument, useProcessedDocument } from "@/hooks/use-document-processing";
 import { getDocumentUrl, validateDocumentFile, type DocumentRecord } from "@/lib/document-service";
 import { Button } from "@/components/ui/button";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -348,7 +349,7 @@ function UploadStep({ projectId }: { projectId: string }) {
     uploadDocument.mutate(file, {
       onSuccess: () => {
         toast.success("Uploaded successfully", {
-          description: "Status: Ready for AI · Uploaded just now",
+          description: "Status: Processing · Uploaded just now",
         });
       },
       onError: (err) => {
@@ -486,35 +487,12 @@ function UploadStep({ projectId }: { projectId: string }) {
           )}
 
           {documents?.map((doc) => (
-            <div key={doc.id} className="flex items-center gap-4 py-3">
-              <div className="grid h-10 w-10 place-items-center rounded-lg bg-rose-soft text-rose">
-                <FileText className="h-4 w-4" />
-              </div>
-              <div className="min-w-0 flex-1">
-                <div className="truncate text-sm font-medium">{doc.filename}</div>
-                <div className="text-xs text-muted-foreground">
-                  {formatFileSize(doc.file_size)} · Uploaded{" "}
-                  {formatDistanceToNowStrict(new Date(doc.created_at))} ago
-                </div>
-              </div>
-              <Badge tone="emerald">
-                {doc.upload_status === "ready" ? "Ready for AI" : doc.upload_status}
-              </Badge>
-              <button
-                onClick={() => handleDownload(doc)}
-                aria-label="Download"
-                className="grid h-8 w-8 place-items-center rounded-lg text-muted-foreground transition hover:bg-accent hover:text-foreground"
-              >
-                <Download className="h-4 w-4" />
-              </button>
-              <button
-                onClick={() => setDeleteTarget(doc)}
-                aria-label="Delete"
-                className="grid h-8 w-8 place-items-center rounded-lg text-muted-foreground transition hover:bg-destructive/10 hover:text-destructive"
-              >
-                <Trash2 className="h-4 w-4" />
-              </button>
-            </div>
+            <DocumentRow
+              key={doc.id}
+              doc={doc}
+              onDownload={handleDownload}
+              onDeleteRequest={setDeleteTarget}
+            />
           ))}
         </div>
       </Card>
@@ -543,6 +521,90 @@ function UploadStep({ projectId }: { projectId: string }) {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+    </div>
+  );
+}
+
+function DocumentRow({
+  doc,
+  onDownload,
+  onDeleteRequest,
+}: {
+  doc: DocumentRecord;
+  onDownload: (doc: DocumentRecord) => void;
+  onDeleteRequest: (doc: DocumentRecord) => void;
+}) {
+  const { data: content } = useProcessedDocument(doc.id);
+  const retryProcessing = useProcessDocument();
+
+  const status = content?.processing_status ?? "processing";
+  const statusLabel =
+    status === "ready" ? "Ready for AI" : status === "failed" ? "Processing Failed" : "Processing…";
+  const statusTone = status === "ready" ? "emerald" : status === "failed" ? "rose" : "amber";
+
+  const processingSeconds =
+    content?.processing_status === "ready"
+      ? Math.max(
+          0,
+          Math.round(
+            (new Date(content.updated_at).getTime() - new Date(content.created_at).getTime()) /
+              1000,
+          ),
+        )
+      : null;
+
+  return (
+    <div className="py-3">
+      <div className="flex items-center gap-4">
+        <div className="grid h-10 w-10 place-items-center rounded-lg bg-rose-soft text-rose">
+          <FileText className="h-4 w-4" />
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="truncate text-sm font-medium">{doc.filename}</div>
+          <div className="text-xs text-muted-foreground">
+            {formatFileSize(doc.file_size)} · Uploaded{" "}
+            {formatDistanceToNowStrict(new Date(doc.created_at))} ago
+          </div>
+        </div>
+        <Badge tone={statusTone}>{statusLabel}</Badge>
+        <button
+          onClick={() => onDownload(doc)}
+          aria-label="Download"
+          className="grid h-8 w-8 place-items-center rounded-lg text-muted-foreground transition hover:bg-accent hover:text-foreground"
+        >
+          <Download className="h-4 w-4" />
+        </button>
+        <button
+          onClick={() => onDeleteRequest(doc)}
+          aria-label="Delete"
+          className="grid h-8 w-8 place-items-center rounded-lg text-muted-foreground transition hover:bg-destructive/10 hover:text-destructive"
+        >
+          <Trash2 className="h-4 w-4" />
+        </button>
+      </div>
+
+      {status === "ready" && content && (
+        <div className="ml-14 mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
+          <span>Pages: {content.page_count ?? "—"}</span>
+          <span>Words: {content.word_count ?? "—"}</span>
+          <span>Language: {content.language ?? "—"}</span>
+          {processingSeconds !== null && <span>Processed in {processingSeconds}s</span>}
+        </div>
+      )}
+
+      {status === "failed" && (
+        <div className="ml-14 mt-2 flex items-center gap-2 text-xs text-rose">
+          <span className="truncate">{content?.processing_error ?? "Processing failed."}</span>
+          <button
+            onClick={() => retryProcessing.mutate(doc.id)}
+            disabled={retryProcessing.isPending}
+            className="inline-flex items-center gap-1 font-medium text-foreground underline-offset-2 hover:underline"
+          >
+            {retryProcessing.isPending && <Loader2 className="h-3 w-3 animate-spin" />}
+            Retry
+          </button>
+        </div>
+      )}
     </div>
   );
 }

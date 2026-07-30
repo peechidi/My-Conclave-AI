@@ -4,6 +4,7 @@
 
 export type ProjectStatus = "draft" | "in-council" | "review" | "published";
 export type DocumentStatus = "uploading" | "ready" | "failed";
+export type ProcessingStatus = "pending" | "processing" | "ready" | "failed";
 
 export type Database = {
   public: {
@@ -80,6 +81,50 @@ export type Database = {
           mime_type?: string;
           file_size?: number;
           upload_status?: DocumentStatus;
+          created_at?: string;
+          updated_at?: string;
+        };
+      };
+      document_contents: {
+        Row: {
+          id: string;
+          document_id: string;
+          project_id: string;
+          user_id: string;
+          raw_text: string | null;
+          page_count: number | null;
+          word_count: number | null;
+          language: string | null;
+          processing_status: ProcessingStatus;
+          processing_error: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          document_id: string;
+          project_id: string;
+          user_id?: string;
+          raw_text?: string | null;
+          page_count?: number | null;
+          word_count?: number | null;
+          language?: string | null;
+          processing_status?: ProcessingStatus;
+          processing_error?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          document_id?: string;
+          project_id?: string;
+          user_id?: string;
+          raw_text?: string | null;
+          page_count?: number | null;
+          word_count?: number | null;
+          language?: string | null;
+          processing_status?: ProcessingStatus;
+          processing_error?: string | null;
           created_at?: string;
           updated_at?: string;
         };
