@@ -1,9 +1,9 @@
 import { createFileRoute, Link, useParams } from "@tanstack/react-router";
 import { useState } from "react";
+import { formatDistanceToNowStrict } from "date-fns";
 import { RequireAuth } from "@/components/auth-guards";
 import { TopNav } from "@/components/top-nav";
 import {
-  sampleProjects,
   councilMembers,
   accentClasses,
   timelineStages,
@@ -12,6 +12,7 @@ import {
   generatedContent,
   templates,
 } from "@/lib/mock-data";
+import { useProject, useProjects } from "@/hooks/use-projects";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import {
@@ -64,8 +65,34 @@ const steps: { id: Step; label: string; icon: typeof Upload }[] = [
 
 function Workspace() {
   const { id } = useParams({ from: "/workspace/$id" });
-  const project = sampleProjects.find((p) => p.id === id) ?? sampleProjects[0];
+  const { data: project, isLoading } = useProject(id);
   const [step, setStep] = useState<Step>("council");
+
+  if (isLoading) {
+    return (
+      <RequireAuth>
+        <div className="flex min-h-screen items-center justify-center bg-surface-muted/40">
+          <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+        </div>
+      </RequireAuth>
+    );
+  }
+
+  if (!project) {
+    return (
+      <RequireAuth>
+        <div className="flex min-h-screen flex-col items-center justify-center gap-3 bg-surface-muted/40 px-4 text-center">
+          <h1 className="font-display text-2xl">Project not found</h1>
+          <p className="text-sm text-muted-foreground">
+            It may have been deleted, or belongs to another account.
+          </p>
+          <Link to="/dashboard" className="text-sm text-indigo hover:underline">
+            Back to dashboard
+          </Link>
+        </div>
+      </RequireAuth>
+    );
+  }
 
   return (
     <RequireAuth>
@@ -92,9 +119,11 @@ function Workspace() {
                     <h1 className="font-display mt-2 text-3xl leading-tight">{project.title}</h1>
                     <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
                       <Badge tone="indigo">{project.audience}</Badge>
-                      <Badge tone="emerald">{project.outputType}</Badge>
+                      <Badge tone="emerald">{project.output_type}</Badge>
                       <span>·</span>
-                      <span>Updated {project.updated}</span>
+                      <span>
+                        Updated {formatDistanceToNowStrict(new Date(project.updated_at))} ago
+                      </span>
                     </div>
                   </div>
                   <div className="flex items-center gap-2">
@@ -171,6 +200,7 @@ function Workspace() {
 
 function WorkspaceSidebar({ activeId }: { activeId: string }) {
   const [openProjects, setOpenProjects] = useState(true);
+  const { data: projects } = useProjects();
   return (
     <aside className="sticky top-14 hidden h-[calc(100vh-3.5rem)] w-64 shrink-0 border-r border-border/70 bg-surface/60 backdrop-blur lg:block">
       <div className="flex h-full flex-col p-4">
@@ -211,7 +241,7 @@ function WorkspaceSidebar({ activeId }: { activeId: string }) {
           </button>
           {openProjects && (
             <div className="mt-2 space-y-0.5">
-              {sampleProjects.map((p) => (
+              {projects?.map((p) => (
                 <Link
                   key={p.id}
                   to="/workspace/$id"

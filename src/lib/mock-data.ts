@@ -1,18 +1,6 @@
-import {
-  Microscope,
-  Palette,
-  Users,
-  Scale,
-  Globe,
-  type LucideIcon,
-} from "lucide-react";
+import { Microscope, Palette, Users, Scale, Globe, type LucideIcon } from "lucide-react";
 
-export type CouncilRole =
-  | "research"
-  | "creative"
-  | "audience"
-  | "ethics"
-  | "cultural";
+export type CouncilRole = "research" | "creative" | "audience" | "ethics" | "cultural";
 
 export type CouncilMember = {
   id: CouncilRole;
@@ -69,94 +57,6 @@ export const councilMembers: CouncilMember[] = [
     accent: "rose",
     bio: "Ensures inclusive, accessible, culturally aware communication.",
     capabilities: ["Inclusive language", "A11y checks", "Localization hints"],
-  },
-];
-
-export type Project = {
-  id: string;
-  title: string;
-  audience: string;
-  outputType: string;
-  status: "draft" | "in-council" | "review" | "published";
-  updated: string;
-  progress: number;
-  trust: number;
-  cover: string;
-  document: string;
-};
-
-export const sampleProjects: Project[] = [
-  {
-    id: "wsp_glp1_pharmacists",
-    title: "GLP-1 Agonists: A Pharmacist's Field Guide",
-    audience: "Community pharmacists",
-    outputType: "Long-form article",
-    status: "in-council",
-    updated: "2m ago",
-    progress: 62,
-    trust: 88,
-    cover: "from-indigo/25 via-sky/20 to-emerald/15",
-    document: "NEJM_2025_GLP1_meta_analysis.pdf",
-  },
-  {
-    id: "wsp_vaccine_parents",
-    title: "Talking to Parents About the Fall Vaccine Schedule",
-    audience: "Parents & caregivers",
-    outputType: "Explainer + social carousel",
-    status: "review",
-    updated: "1h ago",
-    progress: 84,
-    trust: 92,
-    cover: "from-emerald/25 via-sky/15 to-indigo/15",
-    document: "CDC_ACIP_2025_recommendations.pdf",
-  },
-  {
-    id: "wsp_antibiotic_nurses",
-    title: "Antibiotic Stewardship on Night Shift",
-    audience: "ICU nurses",
-    outputType: "Micro-training script",
-    status: "draft",
-    updated: "Yesterday",
-    progress: 24,
-    trust: 71,
-    cover: "from-amber/20 via-rose/15 to-indigo/15",
-    document: "IDSA_stewardship_guidelines.docx",
-  },
-  {
-    id: "wsp_mentalhealth_journalist",
-    title: "Reporting on Adolescent Mental Health",
-    audience: "Health journalists",
-    outputType: "Newsroom brief",
-    status: "published",
-    updated: "3d ago",
-    progress: 100,
-    trust: 95,
-    cover: "from-sky/25 via-indigo/20 to-emerald/15",
-    document: "Lancet_adolescent_mh_2025.pdf",
-  },
-  {
-    id: "wsp_ngo_maternal",
-    title: "Maternal Care Outreach — Rural Toolkit",
-    audience: "NGO field workers",
-    outputType: "Illustrated field guide",
-    status: "in-council",
-    updated: "5d ago",
-    progress: 47,
-    trust: 79,
-    cover: "from-rose/20 via-amber/15 to-emerald/15",
-    document: "WHO_maternal_health_report_2024.pdf",
-  },
-  {
-    id: "wsp_diabetes_educator",
-    title: "Type 2 Diabetes: 90-Second Class Openers",
-    audience: "Health educators",
-    outputType: "Short-form video scripts",
-    status: "draft",
-    updated: "1w ago",
-    progress: 12,
-    trust: 68,
-    cover: "from-emerald/25 via-amber/15 to-sky/15",
-    document: "ADA_standards_of_care_2025.pdf",
   },
 ];
 
