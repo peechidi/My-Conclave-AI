@@ -11,6 +11,7 @@ import { useEffect, type ReactNode } from "react";
 
 import appCss from "../styles.css?url";
 import { reportLovableError } from "../lib/lovable-error-reporting";
+import { AuthProvider } from "../lib/auth-context";
 
 function NotFoundComponent() {
   return (
@@ -84,7 +85,10 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
           "Turn dense healthcare evidence into engaging, trustworthy content. Conclave AI assembles a council of specialized experts that collaborate with you.",
       },
       { name: "author", content: "Conclave AI" },
-      { property: "og:title", content: "Conclave AI — A council of AI experts for trusted content" },
+      {
+        property: "og:title",
+        content: "Conclave AI — A council of AI experts for trusted content",
+      },
       {
         property: "og:description",
         content:
@@ -92,10 +96,25 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },
-      { name: "twitter:title", content: "Conclave AI — A council of AI experts for trusted content" },
-      { name: "twitter:description", content: "Turn dense healthcare evidence into engaging, trustworthy content. Conclave AI assembles a council of specialized experts that collaborate with you." },
-      { property: "og:image", content: "https://pub-bb2e103a32db4e198524a2e9ed8f35b4.r2.dev/ebc35e1c-a48c-4f65-8fd2-a5d312836369/id-preview-bd91ad59--4b55921e-f779-4bc9-b493-14abcef277dd.lovable.app-1785185086945.png" },
-      { name: "twitter:image", content: "https://pub-bb2e103a32db4e198524a2e9ed8f35b4.r2.dev/ebc35e1c-a48c-4f65-8fd2-a5d312836369/id-preview-bd91ad59--4b55921e-f779-4bc9-b493-14abcef277dd.lovable.app-1785185086945.png" },
+      {
+        name: "twitter:title",
+        content: "Conclave AI — A council of AI experts for trusted content",
+      },
+      {
+        name: "twitter:description",
+        content:
+          "Turn dense healthcare evidence into engaging, trustworthy content. Conclave AI assembles a council of specialized experts that collaborate with you.",
+      },
+      {
+        property: "og:image",
+        content:
+          "https://pub-bb2e103a32db4e198524a2e9ed8f35b4.r2.dev/ebc35e1c-a48c-4f65-8fd2-a5d312836369/id-preview-bd91ad59--4b55921e-f779-4bc9-b493-14abcef277dd.lovable.app-1785185086945.png",
+      },
+      {
+        name: "twitter:image",
+        content:
+          "https://pub-bb2e103a32db4e198524a2e9ed8f35b4.r2.dev/ebc35e1c-a48c-4f65-8fd2-a5d312836369/id-preview-bd91ad59--4b55921e-f779-4bc9-b493-14abcef277dd.lovable.app-1785185086945.png",
+      },
     ],
     links: [
       { rel: "stylesheet", href: appCss },
@@ -133,8 +152,10 @@ function RootComponent() {
 
   return (
     <QueryClientProvider client={queryClient}>
-      {/* Required: nested routes render here. Removing <Outlet /> breaks all child routes. */}
-      <Outlet />
+      <AuthProvider>
+        {/* Required: nested routes render here. Removing <Outlet /> breaks all child routes. */}
+        <Outlet />
+      </AuthProvider>
     </QueryClientProvider>
   );
 }

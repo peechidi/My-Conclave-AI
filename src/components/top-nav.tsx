@@ -1,11 +1,27 @@
-import { Link, useRouterState } from "@tanstack/react-router";
+import { Link, useNavigate, useRouterState } from "@tanstack/react-router";
 import { Logo } from "./logo";
 import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
-import { ArrowUpRight } from "lucide-react";
+import { useAuth } from "@/lib/auth-context";
+import { ArrowUpRight, LogOut } from "lucide-react";
 
 export function TopNav({ variant = "app" }: { variant?: "marketing" | "app" }) {
   const path = useRouterState({ select: (s) => s.location.pathname });
+  const { user, signOut } = useAuth();
+  const navigate = useNavigate();
+
+  async function handleLogout() {
+    await signOut();
+    navigate({ to: "/login" });
+  }
 
   if (variant === "marketing") {
     return (
@@ -30,7 +46,7 @@ export function TopNav({ variant = "app" }: { variant?: "marketing" | "app" }) {
           </nav>
           <div className="flex items-center gap-2">
             <Button variant="ghost" size="sm" asChild>
-              <Link to="/dashboard">Sign in</Link>
+              <Link to="/login">Sign in</Link>
             </Button>
             <Button size="sm" asChild className="gap-1.5">
               <Link to="/dashboard">
@@ -49,6 +65,8 @@ export function TopNav({ variant = "app" }: { variant?: "marketing" | "app" }) {
     { to: "/settings", label: "Settings" },
   ];
 
+  const initials = user?.email ? user.email.slice(0, 2).toUpperCase() : "··";
+
   return (
     <header className="sticky top-0 z-30 border-b border-border/70 bg-background/80 backdrop-blur-xl">
       <div className="flex h-14 items-center gap-4 px-6">
@@ -57,7 +75,9 @@ export function TopNav({ variant = "app" }: { variant?: "marketing" | "app" }) {
         <nav className="hidden items-center gap-1 md:flex">
           {tabs.map((t) => {
             const active =
-              t.to === "/dashboard" ? path === "/dashboard" : path.startsWith(t.to.split("/").slice(0, 2).join("/"));
+              t.to === "/dashboard"
+                ? path === "/dashboard"
+                : path.startsWith(t.to.split("/").slice(0, 2).join("/"));
             return (
               <Link
                 key={t.to}
@@ -82,9 +102,24 @@ export function TopNav({ variant = "app" }: { variant?: "marketing" | "app" }) {
             </span>
             Council online · 5 experts
           </div>
-          <div className="grid h-8 w-8 place-items-center rounded-full bg-gradient-to-br from-indigo to-emerald text-xs font-semibold text-white">
-            SR
-          </div>
+          <DropdownMenu>
+            <DropdownMenuTrigger className="grid h-8 w-8 place-items-center rounded-full bg-gradient-to-br from-indigo to-emerald text-xs font-semibold text-white outline-none focus-visible:ring-2 focus-visible:ring-ring">
+              {initials}
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              {user?.email && (
+                <>
+                  <DropdownMenuLabel className="truncate font-normal text-muted-foreground">
+                    {user.email}
+                  </DropdownMenuLabel>
+                  <DropdownMenuSeparator />
+                </>
+              )}
+              <DropdownMenuItem onClick={handleLogout}>
+                <LogOut className="h-4 w-4" /> Log out
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
       </div>
     </header>
