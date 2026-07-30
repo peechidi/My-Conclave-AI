@@ -1,6 +1,7 @@
 import { createFileRoute, Link, useParams } from "@tanstack/react-router";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { formatDistanceToNowStrict } from "date-fns";
+import { toast } from "sonner";
 import { RequireAuth } from "@/components/auth-guards";
 import { TopNav } from "@/components/top-nav";
 import {
@@ -13,7 +14,22 @@ import {
   templates,
 } from "@/lib/mock-data";
 import { useProject, useProjects } from "@/hooks/use-projects";
+import { useDocuments, useDeleteDocument, useUploadDocument } from "@/hooks/use-documents";
+import { getDocumentUrl, validateDocumentFile, type DocumentRecord } from "@/lib/document-service";
 import { Button } from "@/components/ui/button";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Progress } from "@/components/ui/progress";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { cn } from "@/lib/utils";
 import {
   FileText,
@@ -39,7 +55,14 @@ import {
   Sliders,
   ArrowRight,
   MessageSquare,
+  Trash2,
 } from "lucide-react";
+
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
 
 export const Route = createFileRoute("/workspace/$id")({
   head: ({ params }) => ({
@@ -177,7 +200,7 @@ function Workspace() {
 
             <div className="grid gap-6 p-8 xl:grid-cols-[minmax(0,1fr)_360px]">
               <div className="min-w-0">
-                {step === "upload" && <UploadStep />}
+                {step === "upload" && <UploadStep projectId={project.id} />}
                 {step === "council" && <CouncilStep />}
                 {step === "content" && <ContentStep />}
                 {step === "trust" && <TrustStep />}
@@ -301,7 +324,54 @@ function Card({ children, className }: { children: React.ReactNode; className?: 
 
 /* ---------- Steps ---------- */
 
-function UploadStep() {
+function UploadStep({ projectId }: { projectId: string }) {
+  const { data: documents, isLoading, isError } = useDocuments(projectId);
+  const uploadDocument = useUploadDocument(projectId);
+  const deleteDocument = useDeleteDocument(projectId);
+
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [isDragging, setIsDragging] = useState(false);
+  const [validationError, setValidationError] = useState<string | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<DocumentRecord | null>(null);
+
+  function handleFiles(files: FileList | null) {
+    const file = files?.[0];
+    if (!file) return;
+
+    setValidationError(null);
+    const validation = validateDocumentFile(file);
+    if (!validation.valid) {
+      setValidationError(validation.message);
+      return;
+    }
+
+    uploadDocument.mutate(file, {
+      onSuccess: () => {
+        toast.success("Uploaded successfully", {
+          description: "Status: Ready for AI · Uploaded just now",
+        });
+      },
+      onError: (err) => {
+        setValidationError(err instanceof Error ? err.message : "Couldn't upload the document.");
+      },
+    });
+  }
+
+  async function handleDownload(doc: DocumentRecord) {
+    try {
+      const url = await getDocumentUrl(doc.storage_path);
+      window.open(url, "_blank", "noopener,noreferrer");
+    } catch (err) {
+      setValidationError(err instanceof Error ? err.message : "Couldn't open the document.");
+    }
+  }
+
+  async function handleDeleteConfirm() {
+    if (!deleteTarget) return;
+    await deleteDocument.mutateAsync(deleteTarget.id);
+    setDeleteTarget(null);
+  }
+
   return (
     <div className="space-y-6">
       <Card className="p-8">
@@ -310,18 +380,56 @@ function UploadStep() {
         </div>
         <h2 className="font-display text-2xl">Upload a document or paste a URL</h2>
         <p className="mt-1 text-sm text-muted-foreground">
-          PDFs, DOCX, plain text, or a link. Our Research Analyst will parse tables, references, and
-          figures.
+          PDFs, DOCX, plain text, or Markdown. Our Research Analyst will parse tables, references,
+          and figures.
         </p>
 
+        {validationError && (
+          <Alert variant="destructive" className="mt-4">
+            <AlertDescription>{validationError}</AlertDescription>
+          </Alert>
+        )}
+
         <div className="mt-6 grid gap-4 md:grid-cols-2">
-          <div className="rounded-2xl border-2 border-dashed border-border p-8 text-center transition hover:border-indigo hover:bg-indigo-soft/40">
+          <div
+            onDragOver={(e) => {
+              e.preventDefault();
+              setIsDragging(true);
+            }}
+            onDragLeave={() => setIsDragging(false)}
+            onDrop={(e) => {
+              e.preventDefault();
+              setIsDragging(false);
+              handleFiles(e.dataTransfer.files);
+            }}
+            className={cn(
+              "rounded-2xl border-2 border-dashed border-border p-8 text-center transition hover:border-indigo hover:bg-indigo-soft/40",
+              isDragging && "border-indigo bg-indigo-soft/40",
+            )}
+          >
             <div className="mx-auto grid h-12 w-12 place-items-center rounded-2xl bg-indigo-soft text-indigo">
               <Upload className="h-5 w-5" />
             </div>
             <div className="mt-3 font-medium">Drop a file</div>
-            <div className="text-xs text-muted-foreground">PDF, DOCX, TXT · up to 50MB</div>
-            <Button variant="outline" size="sm" className="mt-4">
+            <div className="text-xs text-muted-foreground">PDF, DOCX, TXT, MD · up to 20MB</div>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".pdf,.docx,.txt,.md"
+              className="hidden"
+              onChange={(e) => {
+                handleFiles(e.target.files);
+                e.target.value = "";
+              }}
+            />
+            <Button
+              variant="outline"
+              size="sm"
+              className="mt-4 gap-1.5"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={uploadDocument.isPending}
+            >
+              {uploadDocument.isPending && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
               Browse files
             </Button>
           </div>
@@ -338,49 +446,103 @@ function UploadStep() {
             </div>
           </div>
         </div>
+
+        {uploadDocument.isPending && (
+          <div className="mt-4 rounded-xl border border-border/70 bg-surface-muted/60 p-3">
+            <div className="mb-2 text-xs text-muted-foreground">
+              Uploading {uploadDocument.variables?.name}…
+            </div>
+            <Progress value={100} className="animate-pulse" />
+          </div>
+        )}
       </Card>
 
       <Card className="p-6">
         <div className="flex items-center justify-between">
           <div>
-            <div className="text-sm font-medium">Recently parsed</div>
-            <div className="text-xs text-muted-foreground">Pinned sources for this workspace.</div>
+            <div className="text-sm font-medium">Uploaded documents</div>
+            <div className="text-xs text-muted-foreground">Sources for this workspace.</div>
           </div>
-          <Button variant="ghost" size="sm">
-            Manage
-          </Button>
         </div>
+
+        {isError && (
+          <Alert variant="destructive" className="mt-4">
+            <AlertDescription>Couldn't load documents. Try refreshing the page.</AlertDescription>
+          </Alert>
+        )}
+
         <div className="mt-4 divide-y divide-border">
-          {[
-            {
-              name: "NEJM_2025_GLP1_meta_analysis.pdf",
-              meta: "34 pages · 62 refs",
-              tone: "emerald" as const,
-            },
-            {
-              name: "FDA_2024_compounding_advisory.pdf",
-              meta: "12 pages · 8 refs",
-              tone: "emerald" as const,
-            },
-            {
-              name: "AHA_2025_cardiometabolic_guidelines.pdf",
-              meta: "48 pages · 104 refs",
-              tone: "amber" as const,
-            },
-          ].map((f) => (
-            <div key={f.name} className="flex items-center gap-4 py-3">
+          {isLoading &&
+            Array.from({ length: 2 }).map((_, i) => (
+              <div key={i} className="py-3">
+                <Skeleton className="h-10 rounded-xl" />
+              </div>
+            ))}
+
+          {!isLoading && !isError && documents?.length === 0 && (
+            <div className="py-8 text-center text-sm text-muted-foreground">
+              No documents yet — drop a file above to get started.
+            </div>
+          )}
+
+          {documents?.map((doc) => (
+            <div key={doc.id} className="flex items-center gap-4 py-3">
               <div className="grid h-10 w-10 place-items-center rounded-lg bg-rose-soft text-rose">
                 <FileText className="h-4 w-4" />
               </div>
               <div className="min-w-0 flex-1">
-                <div className="truncate text-sm font-medium">{f.name}</div>
-                <div className="text-xs text-muted-foreground">{f.meta}</div>
+                <div className="truncate text-sm font-medium">{doc.filename}</div>
+                <div className="text-xs text-muted-foreground">
+                  {formatFileSize(doc.file_size)} · Uploaded{" "}
+                  {formatDistanceToNowStrict(new Date(doc.created_at))} ago
+                </div>
               </div>
-              <Badge tone={f.tone}>{f.tone === "emerald" ? "Parsed" : "Parsing…"}</Badge>
+              <Badge tone="emerald">
+                {doc.upload_status === "ready" ? "Ready for AI" : doc.upload_status}
+              </Badge>
+              <button
+                onClick={() => handleDownload(doc)}
+                aria-label="Download"
+                className="grid h-8 w-8 place-items-center rounded-lg text-muted-foreground transition hover:bg-accent hover:text-foreground"
+              >
+                <Download className="h-4 w-4" />
+              </button>
+              <button
+                onClick={() => setDeleteTarget(doc)}
+                aria-label="Delete"
+                className="grid h-8 w-8 place-items-center rounded-lg text-muted-foreground transition hover:bg-destructive/10 hover:text-destructive"
+              >
+                <Trash2 className="h-4 w-4" />
+              </button>
             </div>
           ))}
         </div>
       </Card>
+
+      <AlertDialog
+        open={deleteTarget !== null}
+        onOpenChange={(open) => !open && setDeleteTarget(null)}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete "{deleteTarget?.filename}"?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This removes the file and its record from the workspace. This can't be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleDeleteConfirm}
+              disabled={deleteDocument.isPending}
+              className="gap-1.5 bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              {deleteDocument.isPending && <Loader2 className="h-4 w-4 animate-spin" />}
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

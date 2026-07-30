@@ -3,6 +3,7 @@
 // via the Supabase CLI, and this file becomes redundant.
 
 export type ProjectStatus = "draft" | "in-council" | "review" | "published";
+export type DocumentStatus = "uploading" | "ready" | "failed";
 
 export type Database = {
   public: {
@@ -41,6 +42,44 @@ export type Database = {
           status?: ProjectStatus;
           progress?: number;
           trust_score?: number | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+      };
+      documents: {
+        Row: {
+          id: string;
+          project_id: string;
+          user_id: string;
+          filename: string;
+          storage_path: string;
+          mime_type: string;
+          file_size: number;
+          upload_status: DocumentStatus;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          project_id: string;
+          user_id?: string;
+          filename: string;
+          storage_path: string;
+          mime_type: string;
+          file_size: number;
+          upload_status?: DocumentStatus;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          project_id?: string;
+          user_id?: string;
+          filename?: string;
+          storage_path?: string;
+          mime_type?: string;
+          file_size?: number;
+          upload_status?: DocumentStatus;
           created_at?: string;
           updated_at?: string;
         };

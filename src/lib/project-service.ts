@@ -1,41 +1,8 @@
-import type { PostgrestError } from "@supabase/supabase-js";
 import { supabase } from "@/lib/supabase";
+import { handleSupabaseError, requireUserId } from "@/lib/supabase-helpers";
 import type { Database } from "@/lib/database.types";
 
 export type Project = Database["public"]["Tables"]["projects"]["Row"];
-
-function logSupabaseError(op: string, error: PostgrestError) {
-  console.error(`[projects] ${op} error:`, {
-    code: error.code,
-    message: error.message,
-    details: error.details,
-    hint: error.hint,
-  });
-}
-
-// Verifies against Supabase's Auth server (not the local session cache) so
-// that a stale/missing token surfaces here as an explicit error, not as a
-// silently-undefined user_id on the insert payload below.
-async function requireUserId(): Promise<string> {
-  const { data, error } = await supabase.auth.getUser();
-  console.log("[projects] auth.getUser() user:", data.user);
-  console.log("[projects] auth.getUser() user.id:", data.user?.id);
-
-  if (error) {
-    console.error("[projects] auth.getUser() error:", {
-      name: error.name,
-      status: error.status,
-      message: error.message,
-    });
-    throw new Error(`Not signed in (auth.getUser failed: ${error.message}).`);
-  }
-
-  if (!data.user?.id) {
-    throw new Error("Not signed in: auth.getUser() returned no user.");
-  }
-
-  return data.user.id;
-}
 
 export async function listProjects(): Promise<Project[]> {
   const userId = await requireUserId();
@@ -47,10 +14,7 @@ export async function listProjects(): Promise<Project[]> {
     .eq("user_id", userId)
     .order("updated_at", { ascending: false });
 
-  if (error) {
-    logSupabaseError("list", error);
-    throw error;
-  }
+  if (error) handleSupabaseError("list", error, "Couldn't load your projects.");
   console.log("[projects] list result:", data);
   return data;
 }
@@ -66,10 +30,7 @@ export async function getProject(id: string): Promise<Project | null> {
     .eq("user_id", userId)
     .maybeSingle();
 
-  if (error) {
-    logSupabaseError("get", error);
-    throw error;
-  }
+  if (error) handleSupabaseError("get", error, "Couldn't load the project.");
   console.log("[projects] get result:", data);
   return data;
 }
@@ -81,10 +42,7 @@ export async function createProject(title: string): Promise<Project> {
 
   const { data, error } = await supabase.from("projects").insert(payload).select().single();
 
-  if (error) {
-    logSupabaseError("insert", error);
-    throw error;
-  }
+  if (error) handleSupabaseError("insert", error, "Couldn't create the project.");
   console.log("[projects] insert result:", data);
   return data;
 }
@@ -99,10 +57,7 @@ export async function renameProject(id: string, title: string): Promise<Project>
     .select()
     .single();
 
-  if (error) {
-    logSupabaseError("update", error);
-    throw error;
-  }
+  if (error) handleSupabaseError("update", error, "Couldn't rename the project.");
   console.log("[projects] update result:", data);
   return data;
 }
@@ -112,9 +67,6 @@ export async function deleteProject(id: string): Promise<void> {
 
   const { error } = await supabase.from("projects").delete().eq("id", id);
 
-  if (error) {
-    logSupabaseError("delete", error);
-    throw error;
-  }
+  if (error) handleSupabaseError("delete", error, "Couldn't delete the project.");
   console.log("[projects] delete result: ok");
 }
