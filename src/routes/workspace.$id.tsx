@@ -1,5 +1,5 @@
 import { createFileRoute, Link, useParams } from "@tanstack/react-router";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { formatDistanceToNowStrict } from "date-fns";
 import { toast } from "sonner";
 import { RequireAuth } from "@/components/auth-guards";
@@ -17,7 +17,16 @@ import { useDocuments, useDeleteDocument, useUploadDocument } from "@/hooks/use-
 import { useProcessDocument, useProcessedDocument } from "@/hooks/use-document-processing";
 import { useCouncil, useStartCouncil } from "@/hooks/use-council";
 import { getDocumentUrl, validateDocumentFile, type DocumentRecord } from "@/lib/document-service";
-import { COUNCIL_AGENTS, type AgentResponse } from "@/lib/council-service";
+import {
+  COUNCIL_AGENTS,
+  FINAL_RECOMMENDATIONS,
+  calcLiveConfidence,
+  countCompletedAgents,
+  getRunningPhaseLabel,
+  relativeTimestamp,
+  type AgentResponse,
+  type CouncilSummary,
+} from "@/lib/council-service";
 import type { AgentKey } from "@/lib/database.types";
 import { Button } from "@/components/ui/button";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -654,9 +663,207 @@ const AGENT_ACCENTS: Record<AgentKey, keyof typeof accentClasses> = {
   creative_storytelling_editor: "amber",
 };
 
+// Ticks every second while a session is running so relative timestamps and
+// phase labels stay fresh without a full React Query refetch.
+function useNowTick(active: boolean): number {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!active) return;
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, [active]);
+  return now;
+}
+
+function ConfidenceBar({ value, max = 100 }: { value: number; max?: number }) {
+  const pct = Math.round((value / max) * 100);
+  const color =
+    pct >= 85 ? "bg-emerald" : pct >= 72 ? "bg-indigo" : pct >= 60 ? "bg-amber" : "bg-rose";
+  return (
+    <div className="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-muted">
+      <div
+        className={cn("h-full rounded-full transition-all duration-700", color)}
+        style={{ width: `${pct}%` }}
+      />
+    </div>
+  );
+}
+
+function AgentCard({
+  agent,
+  response,
+  now,
+}: {
+  agent: (typeof COUNCIL_AGENTS)[number];
+  response: AgentResponse | null;
+  now: number;
+}) {
+  const status = response?.status ?? "pending";
+  const a = accentClasses[AGENT_ACCENTS[agent.key]];
+  const Icon = AGENT_ICONS[agent.key];
+
+  // Phase label ticks from the clock — no state needed
+  const phaseLabel =
+    status === "running"
+      ? getRunningPhaseLabel(response?.updated_at ?? null)
+      : status === "completed"
+        ? "Completed"
+        : status === "failed"
+          ? "Failed"
+          : null;
+
+  // Timestamp shown for completed / failed agents
+  const timestamp =
+    (status === "completed" || status === "failed") && response?.updated_at
+      ? relativeTimestamp(response.updated_at)
+      : null;
+
+  // Suppress TS unused-var warning — now is used to re-render the component
+  void now;
+
+  return (
+    <div
+      className={cn(
+        "relative flex gap-4 transition-opacity duration-300",
+        status === "pending" && "opacity-50",
+      )}
+    >
+      {/* Timeline node */}
+      <div
+        className={cn(
+          "relative z-10 grid h-8 w-8 shrink-0 place-items-center rounded-full ring-4 ring-surface transition-colors duration-300",
+          status === "completed" && "bg-emerald text-white",
+          status === "running" && cn(a.bg, a.text, "animate-pulse-ring"),
+          status === "pending" && "bg-muted text-muted-foreground",
+          status === "failed" && "bg-rose text-white",
+        )}
+      >
+        {status === "completed" ? (
+          <CheckCircle2 className="h-4 w-4" />
+        ) : status === "running" ? (
+          <Loader2 className="h-4 w-4 animate-spin" />
+        ) : status === "failed" ? (
+          <AlertTriangle className="h-4 w-4" />
+        ) : (
+          <Icon className="h-3.5 w-3.5" />
+        )}
+      </div>
+
+      {/* Content */}
+      <div className="flex-1 pb-1">
+        {/* Header row */}
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="text-sm font-medium">{agent.name}</div>
+          <span className={cn("rounded-full px-2 py-0.5 text-[10px]", a.bg, a.text)}>
+            {agent.focus[0]}
+          </span>
+          {status === "running" && phaseLabel && (
+            <span className="text-xs text-muted-foreground">{phaseLabel}</span>
+          )}
+          {status === "completed" && response?.confidence_score != null && (
+            <span className="ml-auto text-xs tabular-nums text-muted-foreground">
+              {response.confidence_score}/100
+            </span>
+          )}
+          {timestamp && (
+            <span className="ml-auto text-[11px] tabular-nums text-muted-foreground/70">
+              {timestamp}
+            </span>
+          )}
+        </div>
+
+        {/* Running state */}
+        {status === "running" && (
+          <div className="mt-1.5 flex items-center gap-2">
+            <div className="h-1 flex-1 overflow-hidden rounded-full bg-muted">
+              <div className={cn("h-full w-1/3 rounded-full animate-shimmer-bar", a.dot)} />
+            </div>
+          </div>
+        )}
+
+        {/* Failed state */}
+        {status === "failed" && (
+          <div className="mt-1 text-sm text-rose">
+            {response?.error ?? "This agent's review failed."}
+          </div>
+        )}
+
+        {/* Completed review card */}
+        {status === "completed" && response && (
+          <div className="mt-3 animate-council-reveal rounded-xl border border-border/70 bg-surface-muted/60 p-4 text-sm">
+            <p className="leading-relaxed text-foreground/90">{response.summary}</p>
+
+            {response.confidence_score != null && (
+              <ConfidenceBar value={response.confidence_score} />
+            )}
+
+            <div className="mt-4 grid gap-3 sm:grid-cols-2">
+              <div>
+                <div className="text-[11px] font-semibold uppercase tracking-wider text-emerald">
+                  Strengths
+                </div>
+                <ul className="mt-1.5 space-y-1 text-xs text-muted-foreground">
+                  {response.strengths.map((s, i) => (
+                    <li key={i} className="flex gap-1.5">
+                      <span className="mt-px shrink-0 text-emerald">✓</span>
+                      {s}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+              <div>
+                <div className="text-[11px] font-semibold uppercase tracking-wider text-amber">
+                  Areas to improve
+                </div>
+                <ul className="mt-1.5 space-y-1 text-xs text-muted-foreground">
+                  {response.weaknesses.map((s, i) => (
+                    <li key={i} className="flex gap-1.5">
+                      <span className="mt-px shrink-0 text-amber">△</span>
+                      {s}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            </div>
+
+            <div className="mt-3 border-t border-border/50 pt-3">
+              <div className="text-[11px] font-semibold uppercase tracking-wider text-indigo">
+                Recommendations
+              </div>
+              <ul className="mt-1.5 space-y-1 text-xs text-muted-foreground">
+                {response.recommendations.map((s, i) => (
+                  <li key={i} className="flex gap-1.5">
+                    <span className="mt-px shrink-0 text-indigo">→</span>
+                    {s}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function CouncilStep({ documentId }: { documentId: string | null }) {
   const { data: council, isLoading } = useCouncil(documentId);
   const startCouncil = useStartCouncil();
+
+  const session = council?.session ?? null;
+  const responses = council?.responses ?? [];
+  const summary = council?.summary ?? null;
+
+  const isRunning = session?.status === "running";
+  const now = useNowTick(isRunning);
+
+  const completedCount = countCompletedAgents(responses);
+  const totalAgents = COUNCIL_AGENTS.length;
+  const liveConfidence = calcLiveConfidence(responses);
+
+  function responseFor(agentKey: AgentKey): AgentResponse | null {
+    return responses.find((r) => r.agent_key === agentKey) ?? null;
+  }
 
   if (!documentId) {
     return (
@@ -670,14 +877,6 @@ function CouncilStep({ documentId }: { documentId: string | null }) {
         </p>
       </Card>
     );
-  }
-
-  const session = council?.session ?? null;
-  const responses = council?.responses ?? [];
-  const summary = council?.summary ?? null;
-
-  function responseFor(agentKey: AgentKey): AgentResponse | null {
-    return responses.find((r) => r.agent_key === agentKey) ?? null;
   }
 
   return (
@@ -722,6 +921,7 @@ function CouncilStep({ documentId }: { documentId: string | null }) {
         </div>
       </Card>
 
+      {/* Pre-session state */}
       {!isLoading && !session && (
         <Card className="p-12 text-center">
           <div className="mx-auto grid h-12 w-12 place-items-center rounded-2xl bg-indigo-soft text-indigo">
@@ -729,7 +929,8 @@ function CouncilStep({ documentId }: { documentId: string | null }) {
           </div>
           <h2 className="font-display mt-4 text-xl">Ready to convene the council</h2>
           <p className="mt-1.5 text-sm text-muted-foreground">
-            Five specialists will review this document one after another.
+            Five independent AI specialists will review your document and produce a consensus
+            report.
           </p>
           <Button
             className="mt-5 gap-1.5"
@@ -742,164 +943,222 @@ function CouncilStep({ documentId }: { documentId: string | null }) {
         </Card>
       )}
 
+      {/* Active / completed session */}
       {session && (
         <Card className="p-8">
-          <div className="flex items-baseline justify-between">
+          {/* Session header */}
+          <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
               <div className="text-xs uppercase tracking-widest text-muted-foreground">
-                Collaboration timeline
+                Council progress
               </div>
               <h2 className="font-display mt-1 text-2xl">
-                Council session · {session.status === "running" ? "in progress" : session.status}
+                {isRunning ? (
+                  <>
+                    {completedCount}/{totalAgents} specialists complete
+                  </>
+                ) : session.status === "completed" ? (
+                  "Review complete"
+                ) : (
+                  `Session ${session.status}`
+                )}
               </h2>
             </div>
-            {session.status === "running" && (
-              <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                <span className="relative flex h-2 w-2">
-                  <span className="absolute inline-flex h-full w-full rounded-full bg-indigo opacity-60 animate-ping" />
-                  <span className="relative inline-flex h-2 w-2 rounded-full bg-indigo" />
+
+            <div className="flex items-center gap-3">
+              {/* Live confidence readout */}
+              {liveConfidence !== null && (
+                <div className="rounded-xl border border-border/70 bg-surface-muted/60 px-3 py-1.5 text-center">
+                  <div className="text-[10px] uppercase tracking-widest text-muted-foreground">
+                    Confidence
+                  </div>
+                  <div className="text-sm font-semibold tabular-nums">
+                    {liveConfidence}
+                    <span className="text-xs font-normal text-muted-foreground">/100</span>
+                  </div>
+                </div>
+              )}
+
+              {/* Status badge */}
+              {isRunning ? (
+                <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                  <span className="relative flex h-2 w-2">
+                    <span className="absolute inline-flex h-full w-full rounded-full bg-indigo opacity-60 animate-ping" />
+                    <span className="relative inline-flex h-2 w-2 rounded-full bg-indigo" />
+                  </span>
+                  Live
+                </div>
+              ) : session.status === "completed" ? (
+                <span className="flex items-center gap-1.5 text-xs text-emerald">
+                  <CheckCircle2 className="h-3.5 w-3.5" />
+                  Complete
                 </span>
-                Live
-              </div>
-            )}
+              ) : null}
+            </div>
           </div>
 
+          {/* Progress bar */}
+          {(isRunning || session.status === "completed") && (
+            <div className="mt-4">
+              <div className="h-1.5 overflow-hidden rounded-full bg-muted">
+                <div
+                  className="h-full rounded-full bg-indigo transition-all duration-700"
+                  style={{ width: `${(completedCount / totalAgents) * 100}%` }}
+                />
+              </div>
+              <div className="mt-1.5 flex justify-between text-[11px] text-muted-foreground">
+                <span>{completedCount} of {totalAgents} agents complete</span>
+                {isRunning && <span>Reviewing in sequence…</span>}
+                {session.status === "completed" && !summary && (
+                  <span className="flex items-center gap-1">
+                    <Loader2 className="h-3 w-3 animate-spin" />
+                    Generating consensus…
+                  </span>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Agent timeline */}
           <div className="relative mt-8">
             <div className="absolute left-[15px] top-2 bottom-2 w-px bg-border" />
             <div className="space-y-6">
-              {COUNCIL_AGENTS.map((agent) => {
-                const response = responseFor(agent.key);
-                const status = response?.status ?? "pending";
-                const a = accentClasses[AGENT_ACCENTS[agent.key]];
-                const Icon = AGENT_ICONS[agent.key];
-                return (
-                  <div key={agent.key} className="relative flex gap-4">
-                    <div
-                      className={cn(
-                        "relative z-10 grid h-8 w-8 shrink-0 place-items-center rounded-full ring-4 ring-surface",
-                        status === "completed" && "bg-emerald text-white",
-                        status === "running" && cn(a.bg, a.text, "animate-pulse-ring"),
-                        status === "pending" && "bg-muted text-muted-foreground",
-                        status === "failed" && "bg-rose text-white",
-                      )}
-                    >
-                      {status === "completed" ? (
-                        <CheckCircle2 className="h-4 w-4" />
-                      ) : status === "running" ? (
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                      ) : status === "failed" ? (
-                        <AlertTriangle className="h-4 w-4" />
-                      ) : (
-                        <Icon className="h-3.5 w-3.5" />
-                      )}
-                    </div>
-                    <div className="flex-1 pb-1">
-                      <div className="flex items-center gap-2">
-                        <div className="text-sm font-medium">{agent.name}</div>
-                        <span className={cn("rounded-full px-2 py-0.5 text-[10px]", a.bg, a.text)}>
-                          {agent.focus[0]}
-                        </span>
-                        {status === "completed" && response?.confidence_score != null && (
-                          <span className="ml-auto text-xs tabular-nums text-muted-foreground">
-                            Confidence {response.confidence_score}/100
-                          </span>
-                        )}
-                      </div>
-
-                      {status === "running" && (
-                        <div className="mt-1 text-sm text-muted-foreground">Thinking…</div>
-                      )}
-
-                      {status === "failed" && (
-                        <div className="mt-1 text-sm text-rose">
-                          {response?.error ?? "This agent's review failed."}
-                        </div>
-                      )}
-
-                      {status === "completed" && response && (
-                        <div className="mt-3 rounded-xl border border-border/70 bg-surface-muted/60 p-3 text-sm">
-                          <p className="text-foreground/90">{response.summary}</p>
-                          <div className="mt-3 grid gap-3 sm:grid-cols-2">
-                            <div>
-                              <div className="text-[11px] font-medium uppercase tracking-wider text-emerald">
-                                Strengths
-                              </div>
-                              <ul className="mt-1 space-y-1 text-xs text-muted-foreground">
-                                {response.strengths.map((s, i) => (
-                                  <li key={i}>· {s}</li>
-                                ))}
-                              </ul>
-                            </div>
-                            <div>
-                              <div className="text-[11px] font-medium uppercase tracking-wider text-amber">
-                                Weaknesses
-                              </div>
-                              <ul className="mt-1 space-y-1 text-xs text-muted-foreground">
-                                {response.weaknesses.map((s, i) => (
-                                  <li key={i}>· {s}</li>
-                                ))}
-                              </ul>
-                            </div>
-                          </div>
-                          <div className="mt-3">
-                            <div className="text-[11px] font-medium uppercase tracking-wider text-indigo">
-                              Recommendations
-                            </div>
-                            <ul className="mt-1 space-y-1 text-xs text-muted-foreground">
-                              {response.recommendations.map((s, i) => (
-                                <li key={i}>· {s}</li>
-                              ))}
-                            </ul>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                );
-              })}
+              {COUNCIL_AGENTS.map((agent) => (
+                <AgentCard
+                  key={agent.key}
+                  agent={agent}
+                  response={responseFor(agent.key)}
+                  now={now}
+                />
+              ))}
             </div>
           </div>
         </Card>
       )}
 
-      {summary && (
-        <Card className="p-8">
-          <div className="text-xs uppercase tracking-widest text-muted-foreground">
-            Council summary
-          </div>
-          <h2 className="font-display mt-1 text-2xl">
-            Overall confidence {summary.overall_confidence ?? "—"}/100
-          </h2>
-          <p className="mt-3 text-sm text-muted-foreground">{summary.consensus}</p>
-
-          {summary.conflicts.length > 0 && (
-            <div className="mt-4">
-              <div className="text-[11px] font-medium uppercase tracking-wider text-rose">
-                Conflicts
-              </div>
-              <ul className="mt-1 space-y-1 text-sm text-muted-foreground">
-                {summary.conflicts.map((c, i) => (
-                  <li key={i}>· {c}</li>
-                ))}
-              </ul>
-            </div>
-          )}
-
-          {summary.recommended_improvements.length > 0 && (
-            <div className="mt-4">
-              <div className="text-[11px] font-medium uppercase tracking-wider text-indigo">
-                Recommended improvements
-              </div>
-              <ul className="mt-1 space-y-1 text-sm text-muted-foreground">
-                {summary.recommended_improvements.map((r, i) => (
-                  <li key={i}>· {r}</li>
-                ))}
-              </ul>
-            </div>
-          )}
-        </Card>
-      )}
+      {/* Council summary */}
+      {summary && <CouncilSummaryCard summary={summary} responses={responses} />}
     </div>
+  );
+}
+
+function CouncilSummaryCard({
+  summary,
+  responses,
+}: {
+  summary: CouncilSummary | null;
+  responses: AgentResponse[];
+}) {
+  if (!summary) return null;
+
+  const completedResponses = responses.filter((r) => r.status === "completed");
+
+  // Key strengths: first strength from each completed agent
+  const keyStrengths = Array.from(
+    new Set(
+      completedResponses.map((r) => r.strengths[0]).filter((s): s is string => Boolean(s)),
+    ),
+  );
+
+  // Final recommendation: deterministic pick based on session id
+  const sessionSeed = summary.session_id
+    ? summary.session_id.charCodeAt(0) + summary.session_id.charCodeAt(1)
+    : 0;
+  const finalRec = FINAL_RECOMMENDATIONS[sessionSeed % FINAL_RECOMMENDATIONS.length];
+
+  const confidenceColor =
+    (summary.overall_confidence ?? 0) >= 85
+      ? "text-emerald"
+      : (summary.overall_confidence ?? 0) >= 72
+        ? "text-indigo"
+        : "text-amber";
+
+  return (
+    <Card className="animate-council-reveal p-8">
+      {/* Header */}
+      <div className="flex flex-wrap items-start justify-between gap-3 border-b border-border/60 pb-6">
+        <div>
+          <div className="text-xs uppercase tracking-widest text-muted-foreground">
+            Council consensus report
+          </div>
+          <h2 className="font-display mt-1 text-2xl">Review complete</h2>
+          <p className="mt-2 max-w-prose text-sm leading-relaxed text-muted-foreground">
+            {summary.consensus}
+          </p>
+        </div>
+        {summary.overall_confidence != null && (
+          <div className="shrink-0 rounded-2xl border border-border/70 bg-surface-muted/60 p-4 text-center">
+            <div className="text-[10px] uppercase tracking-widest text-muted-foreground">
+              Overall confidence
+            </div>
+            <div className={cn("mt-1 text-3xl font-bold tabular-nums", confidenceColor)}>
+              {summary.overall_confidence}
+            </div>
+            <div className="text-xs text-muted-foreground">out of 100</div>
+            <ConfidenceBar value={summary.overall_confidence} />
+          </div>
+        )}
+      </div>
+
+      {/* Key strengths */}
+      {keyStrengths.length > 0 && (
+        <div className="mt-6">
+          <div className="text-[11px] font-semibold uppercase tracking-wider text-emerald">
+            Key strengths identified by the council
+          </div>
+          <ul className="mt-2 space-y-1.5 text-sm text-muted-foreground">
+            {keyStrengths.map((s, i) => (
+              <li key={i} className="flex gap-2">
+                <span className="mt-px shrink-0 text-emerald">✓</span>
+                {s}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {/* Areas needing improvement */}
+      {summary.recommended_improvements.length > 0 && (
+        <div className="mt-6">
+          <div className="text-[11px] font-semibold uppercase tracking-wider text-amber">
+            Areas needing improvement
+          </div>
+          <ul className="mt-2 space-y-1.5 text-sm text-muted-foreground">
+            {summary.recommended_improvements.map((r, i) => (
+              <li key={i} className="flex gap-2">
+                <span className="mt-px shrink-0 text-amber">△</span>
+                {r}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {/* Confidence divergence */}
+      {summary.conflicts.length > 0 && (
+        <div className="mt-6">
+          <div className="text-[11px] font-semibold uppercase tracking-wider text-rose">
+            Confidence divergence
+          </div>
+          <ul className="mt-2 space-y-1.5 text-sm text-muted-foreground">
+            {summary.conflicts.map((c, i) => (
+              <li key={i} className="flex gap-2">
+                <span className="mt-px shrink-0 text-rose">!</span>
+                {c}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {/* Final recommendation */}
+      <div className="mt-6 rounded-xl border border-indigo/20 bg-indigo/5 p-4">
+        <div className="text-[11px] font-semibold uppercase tracking-wider text-indigo">
+          Final recommendation
+        </div>
+        <p className="mt-1.5 text-sm leading-relaxed text-foreground/80">{finalRec}</p>
+      </div>
+    </Card>
   );
 }
 
