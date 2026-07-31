@@ -106,20 +106,10 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
         content:
           "Turn dense healthcare evidence into engaging, trustworthy content. Conclave AI assembles a council of specialized experts that collaborate with you.",
       },
-      {
-        property: "og:image",
-        content:
-          "https://pub-bb2e103a32db4e198524a2e9ed8f35b4.r2.dev/ebc35e1c-a48c-4f65-8fd2-a5d312836369/id-preview-bd91ad59--4b55921e-f779-4bc9-b493-14abcef277dd.lovable.app-1785185086945.png",
-      },
-      {
-        name: "twitter:image",
-        content:
-          "https://pub-bb2e103a32db4e198524a2e9ed8f35b4.r2.dev/ebc35e1c-a48c-4f65-8fd2-a5d312836369/id-preview-bd91ad59--4b55921e-f779-4bc9-b493-14abcef277dd.lovable.app-1785185086945.png",
-      },
     ],
     links: [
       { rel: "stylesheet", href: appCss },
-      { rel: "icon", href: "/favicon.ico", type: "image/x-icon" },
+      { rel: "icon", href: "/favicon.png", type: "image/png" },
       { rel: "preconnect", href: "https://fonts.googleapis.com" },
       { rel: "preconnect", href: "https://fonts.gstatic.com", crossOrigin: "anonymous" },
       {
